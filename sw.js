@@ -1,6 +1,6 @@
 // Service Worker: App-Dateien zwischenspeichern, damit die App auch offline startet.
 // Eigene Dateien: erst Netz (für Updates), bei Fehler Cache. Fremde Server (Open Food Facts) werden nicht angefasst.
-const CACHE = 'essenszaehler-v1';
+const CACHE = 'essenszaehler-v2';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

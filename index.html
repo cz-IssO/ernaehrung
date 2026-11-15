@@ -42,7 +42,7 @@ textarea.inp{min-height:120px;resize:vertical}
 .bar{height:8px;background:var(--card2);border-radius:5px;overflow:hidden;margin-top:6px}
 .bar>div{height:100%;border-radius:5px}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
-.macros .v{font-weight:600}
+.macros .v,.minor .v{font-weight:600}
 .minor{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
 .ent{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer}
 .ent:last-of-type{border-bottom:0}
@@ -99,7 +99,7 @@ svg text{font-family:system-ui,sans-serif}
    ========================================================= */
 
 const KEY = 'essenszaehler_v1';
-const VERSION = '1.0';
+const VERSION = '1.1';
 
 // Nährwerte: Schlüssel, Name, Einheit
 const NUT = [['kcal','Kalorien','kcal'],['p','Eiweiß','g'],['c','Kohlenhydrate','g'],['f','Fett','g'],['fib','Ballaststoffe','g'],['sug','Zucker','g'],['salt','Salz','g']];
@@ -212,9 +212,9 @@ function render(){
 }
 
 /* ---------- Tagebuch ---------- */
-function bar(v,g,col){ const pc = g>0 ? Math.min(100, v/g*100) : 0; return `<div class="bar"><div style="width:${pc}%;background:${v>g*1.0001?'var(--bad)':col}"></div></div>`; }
+function bar(v,g,col,overOk){ const pc = g>0 ? Math.min(100, v/g*100) : 0; return `<div class="bar"><div style="width:${pc}%;background:${(!overOk && v>g*1.0001)?'var(--bad)':col}"></div></div>`; }
 function mac(l,v,g,col){ return `<div><div class="mut small">${l}</div><div class="v">${fmt(v)} <span class="mut small">/ ${fmt(g)} g</span></div>${bar(v,g,col)}</div>`; }
-function minor(l,v,g,type){ const over = type==='max' ? v>g : false, low = type==='min' ? v<g : false; return `<div><div class="mut small">${l} (${type==='min'?'mind.':'max.'})</div><div class="${over?'bad':(type==='min'&&!low?'ok':'')}">${fmtF(v)} / ${fmt(g)} g</div></div>`; }
+function minor(l,v,g,type){ const reached = v>=g; const col = type==='min' ? (reached?'var(--acc)':'var(--acc2)') : '#b48ead'; return `<div><div class="mut small">${l}</div><div class="v">${fmtF(v)} <span class="mut small">/ ${fmt(g)} g</span></div>${bar(v,g,col,type==='min')}</div>`; }
 
 function vDiary(){
   const g = goals(), list = entries(cur), t = tot(list); let h = '';
@@ -229,7 +229,7 @@ function vDiary(){
   h += `<div class="card"><div class="big">${fmt(t.kcal)} <span class="mut" style="font-size:16px;font-weight:400">/ ${fmt(g.kcal)} kcal</span></div>
     <div class="mut">${rest>=0 ? 'Noch '+fmt(rest)+' kcal übrig' : '<span class="bad">'+fmt(-rest)+' kcal über dem Ziel</span>'}</div>${bar(t.kcal,g.kcal,'var(--acc)')}
     <div class="macros">${mac('Eiweiß',t.p,g.p,'var(--p)')}${mac('Kohlenhydrate',t.c,g.c,'var(--c)')}${mac('Fett',t.f,g.f,'var(--f)')}</div>
-    <div class="minor">${minor('Ballaststoffe',t.fib,g.fib,'min')}${minor('Zucker',t.sug,g.sug,'max')}${minor('Salz',t.salt,g.salt,'max')}</div></div>`;
+    <div class="minor">${minor('Ballaststoffe',t.fib,g.fib,'min')}${minor('Zucker',t.sug,g.sug,'max')}${minor('Salz',t.salt,g.salt,'max')}</div><div class="mut small" style="margin-top:8px">Ballaststoffe = Mindestziel (grün, wenn erreicht) · Zucker & Salz = Höchstwerte (rot, wenn überschritten)</div></div>`;
   D.meals.forEach((name,i) => {
     const L = list.filter(e => e.meal===i), mt = tot(L);
     h += `<div class="card"><div class="row"><b style="flex:1">${esc(name)}</b><span class="mut">${fmt(mt.kcal)} kcal</span></div><div class="list">`;
