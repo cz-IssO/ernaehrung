@@ -99,7 +99,7 @@ svg text{font-family:system-ui,sans-serif}
    ========================================================= */
 
 const KEY = 'essenszaehler_v1';
-const VERSION = '1.1';
+const VERSION = '1.2';
 
 // Nährwerte: Schlüssel, Name, Einheit
 const NUT = [['kcal','Kalorien','kcal'],['p','Eiweiß','g'],['c','Kohlenhydrate','g'],['f','Fett','g'],['fib','Ballaststoffe','g'],['sug','Zucker','g'],['salt','Salz','g']];
@@ -119,7 +119,7 @@ function defaults(){
   return {
     profile:{sex:'m',birth:'',height:'',weight:'',palIdx:2,pal:1.65,sport:false,deficit:500,
       goal:2000,calcWeight:null,calcDate:null,lastPrompt:null,
-      protPerKg:0.8,fatPct:30,fib:30,sug:50,salt:6},
+      protPerKg:0.8,fatPct:30,fib:30,sug:50,salt:6,macroMode:'auto',protG:0,carbG:0,fatG:0},
     meals:['Frühstück','Mittagessen','Abendessen','Snacks'],
     diary:{}, foods:{}, recent:[], fav:[], recipes:[], shop:[],
     weights:{}, water:{}, waterGoal:2000,
@@ -162,13 +162,16 @@ function tot(list){ const t = Z(); list.forEach(e => { for(const k in t) t[k] +=
 function latestWeight(){ const ks = Object.keys(D.weights).sort(); return ks.length ? {k:ks[ks.length-1], kg:D.weights[ks[ks.length-1]]} : null; }
 function avg7(k, min=3){ const v = []; for(let i=0;i<7;i++){ const x = D.weights[addDays(k,-i)]; if(x!=null) v.push(x); } return v.length>=min ? v.reduce((a,b)=>a+b,0)/v.length : null; }
 
+function autoMacros(g, w){
+  const p = D.profile, prot = Math.round(p.protPerKg * w), fat = Math.round(g * p.fatPct / 100 / 9);
+  return {p:prot, f:fat, c:Math.max(0, Math.round((g - prot*4 - fat*9) / 4))};
+}
 function goals(){
   const p = D.profile, g = p.goal || 2000;
   const w = p.calcWeight || num(p.weight) || (latestWeight()?.kg) || 80;
-  const prot = Math.round(p.protPerKg * w);
-  const fat = Math.round(g * p.fatPct / 100 / 9);
-  const carb = Math.max(0, Math.round((g - prot*4 - fat*9) / 4));
-  return {kcal:g, p:prot, c:carb, f:fat, fib:p.fib, sug:p.sug, salt:p.salt, w};
+  const auto = autoMacros(g, w);
+  if(p.macroMode==='manual') return {kcal:g, p:p.protG, c:p.carbG, f:p.fatG, fib:p.fib, sug:p.sug, salt:p.salt, w, auto};
+  return {kcal:g, p:auto.p, c:auto.c, f:auto.f, fib:p.fib, sug:p.sug, salt:p.salt, w, auto};
 }
 
 // Grundumsatz nach Mifflin-St Jeor, Gesamtumsatz = Grundumsatz × PAL
@@ -630,17 +633,35 @@ function vMore(){
 
   h += `<div class="card"><b>Tagesziel manuell setzen</b><div class="row gap"><input id="mg" class="inp" style="flex:1" inputmode="numeric" placeholder="kcal" value="${fmt(p.goal)}"><button class="btn ghost" onclick="manualGoal()">Setzen</button></div></div>`;
 
-  h += `<div class="card"><b>Nährwertziele</b>
-    <div class="row"><div style="flex:1"><label class="lbl">Eiweiß (g pro kg)</label><input class="inp" inputmode="decimal" value="${fmt(p.protPerKg,2)}" onchange="D.profile.protPerKg=num(this.value);save();render()"></div>
-    <div style="flex:1"><label class="lbl">Fett (% der kcal)</label><input class="inp" inputmode="decimal" value="${fmt(p.fatPct)}" onchange="D.profile.fatPct=num(this.value);save();render()"></div></div>
-    <div class="row"><div style="flex:1"><label class="lbl">Ballaststoffe mind. (g)</label><input class="inp" inputmode="decimal" value="${fmt(p.fib)}" onchange="D.profile.fib=num(this.value);save();render()"></div>
-    <div style="flex:1"><label class="lbl">Zucker max. (g)</label><input class="inp" inputmode="decimal" value="${fmt(p.sug)}" onchange="D.profile.sug=num(this.value);save();render()"></div>
-    <div style="flex:1"><label class="lbl">Salz max. (g)</label><input class="inp" inputmode="decimal" value="${fmt(p.salt,1)}" onchange="D.profile.salt=num(this.value);save();render()"></div></div>
-    <div class="mut small" style="margin-top:8px">Richtwerte: Eiweiß 0,8 g/kg, Fett ca. 30 %, Ballaststoffe mind. 30 g, Salz max. 6 g (DGE). Zucker: WHO empfiehlt max. 10 % der Energie aus freiem Zucker – die App zählt den Gesamtzucker laut Packung.</div>
-    <div class="calc">Eiweiß  = ${fmt(p.protPerKg,2)} g × ${fmtF(g.w)} kg = ${fmt(g.p)} g  (${fmt(g.p*4)} kcal)
+  const man = p.macroMode==='manual';
+  h += `<div class="card" id="macrocard"><b>Nährwertziele</b>
+    <div class="seg" style="margin-top:10px"><button class="${man?'':'on'}" onclick="setMacroMode('auto')">Automatisch</button><button class="${man?'on':''}" onclick="setMacroMode('manual')">Feste Gramm</button></div>`;
+  if(man){
+    const sum = g.p*4 + g.c*4 + g.f*9, diff = sum - g.kcal;
+    h += `<div class="row"><div style="flex:1"><label class="lbl">Eiweiß (g)</label><input class="inp" inputmode="decimal" value="${fmt(p.protG)}" onchange="D.profile.protG=num(this.value);save();render()"></div>
+      <div style="flex:1"><label class="lbl">Kohlenh. (g)</label><input class="inp" inputmode="decimal" value="${fmt(p.carbG)}" onchange="D.profile.carbG=num(this.value);save();render()"></div>
+      <div style="flex:1"><label class="lbl">Fett (g)</label><input class="inp" inputmode="decimal" value="${fmt(p.fatG)}" onchange="D.profile.fatG=num(this.value);save();render()"></div></div>
+      <button class="chip" style="margin-top:8px" onclick="carbRest()">Kohlenhydrate = Rest bis zum Tagesziel</button>
+      <div class="calc">Eiweiß  ${fmt(g.p)} g × 4 = ${fmt(g.p*4)} kcal
+Kohlenh. ${fmt(g.c)} g × 4 = ${fmt(g.c*4)} kcal
+Fett    ${fmt(g.f)} g × 9 = ${fmt(g.f*9)} kcal
+─────────────────────────
+Summe          = ${fmt(sum)} kcal
+Tagesziel      = ${fmt(g.kcal)} kcal
+${Math.abs(diff)<=50?'✓ passt zum Tagesziel':(diff>0?'⚠ '+fmt(diff)+' kcal mehr als das Tagesziel':'⚠ '+fmt(-diff)+' kcal weniger als das Tagesziel')}
+(1 g Eiweiß/KH ≈ 4 kcal, 1 g Fett ≈ 9 kcal)</div>`;
+  } else {
+    h += `<div class="row"><div style="flex:1"><label class="lbl">Eiweiß (g pro kg)</label><input class="inp" inputmode="decimal" value="${fmt(p.protPerKg,2)}" onchange="D.profile.protPerKg=num(this.value);save();render()"></div>
+      <div style="flex:1"><label class="lbl">Fett (% der kcal)</label><input class="inp" inputmode="decimal" value="${fmt(p.fatPct)}" onchange="D.profile.fatPct=num(this.value);save();render()"></div></div>
+      <div class="calc">Eiweiß  = ${fmt(p.protPerKg,2)} g × ${fmtF(g.w)} kg = ${fmt(g.p)} g  (${fmt(g.p*4)} kcal)
 Fett    = ${fmt(p.fatPct)} % × ${fmt(g.kcal)} kcal ÷ 9 = ${fmt(g.f)} g
 Kohlenh.= (${fmt(g.kcal)} − ${fmt(g.p*4)} − ${fmt(g.f*9)}) ÷ 4 = ${fmt(g.c)} g
-(1 g Eiweiß/KH ≈ 4 kcal, 1 g Fett ≈ 9 kcal)</div></div>`;
+(1 g Eiweiß/KH ≈ 4 kcal, 1 g Fett ≈ 9 kcal)</div>`;
+  }
+  h += `<div class="row"><div style="flex:1"><label class="lbl">Ballaststoffe ≥ g</label><input class="inp" inputmode="decimal" value="${fmt(p.fib)}" onchange="D.profile.fib=num(this.value);save();render()"></div>
+    <div style="flex:1"><label class="lbl">Zucker ≤ g</label><input class="inp" inputmode="decimal" value="${fmt(p.sug)}" onchange="D.profile.sug=num(this.value);save();render()"></div>
+    <div style="flex:1"><label class="lbl">Salz ≤ g</label><input class="inp" inputmode="decimal" value="${fmt(p.salt,1)}" onchange="D.profile.salt=num(this.value);save();render()"></div></div>
+    <div class="mut small" style="margin-top:8px">Richtwerte: Eiweiß 0,8 g/kg, Fett ca. 30 %, Ballaststoffe mind. 30 g, Salz max. 6 g (DGE). Zucker: WHO empfiehlt max. 10 % der Energie aus freiem Zucker – die App zählt den Gesamtzucker laut Packung.</div></div>`;
 
   h += `<div class="card"><b>Mahlzeiten</b><div class="mut small">Namen frei änderbar (z. B. für Schichten)</div>${D.meals.map((m,i)=>`<input class="inp" style="margin-top:8px" value="${esc(m)}" onchange="D.meals[${i}]=this.value.trim()||'Mahlzeit ${i+1}';save()">`).join('')}
     <label class="lbl">Wasser-Ziel (ml)</label><input class="inp" inputmode="numeric" value="${D.waterGoal}" onchange="D.waterGoal=num(this.value)||2000;save()"></div>`;
@@ -656,6 +677,8 @@ Kohlenh.= (${fmt(g.kcal)} − ${fmt(g.p*4)} − ${fmt(g.f*9)}) ÷ 4 = ${fmt(g.c)
     Alle Werte sind Schätzungen, keine medizinische Beratung. Version ${VERSION}</div>`;
   return h;
 }
+function setMacroMode(m){ const p = D.profile, g = goals(); if(m==='manual' && !p.protG && !p.carbG && !p.fatG){ p.protG = g.auto.p; p.carbG = g.auto.c; p.fatG = g.auto.f; } p.macroMode = m; save(); render(); setTimeout(()=>$('#macrocard')?.scrollIntoView(),30); }
+function carbRest(){ const p = D.profile; p.carbG = Math.max(0, Math.round((p.goal - p.protG*4 - p.fatG*9)/4)); save(); render(); setTimeout(()=>$('#macrocard')?.scrollIntoView(),30); }
 function setPal(i){ const x = PAL[i]; D.profile.palIdx = i; D.profile.pal = Math.round((x.min+x.max)/2*100)/100; $('#palv').value = fmt(D.profile.pal,2); document.querySelectorAll('.pal input[type=radio]').forEach((r,j)=>r.parentElement.classList.toggle('on',j===i)); pchg(); }
 function setDef(v){ D.profile.deficit = v; $('#defv').value = fmt(v); document.querySelectorAll('.defc').forEach(c => c.classList.toggle('on', +c.dataset.v===v)); pchg(); }
 function pchg(){ save(); updCalc(); }
