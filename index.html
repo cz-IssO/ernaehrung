@@ -57,6 +57,7 @@ table.nut td:not(:first-child){text-align:right}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .stat{background:var(--card2);border-radius:10px;padding:10px}
 .stat .v{font-size:20px;font-weight:700}
+.stat .bar{background:var(--line)}
 .note{border:1px solid var(--warn);background:rgba(230,162,60,.08)}
 nav.tabs{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:6}
 nav.tabs button{flex:1;background:none;border:0;color:var(--mut);padding:7px 0 9px;font-size:11px;font-family:inherit;cursor:pointer}
@@ -99,7 +100,7 @@ svg text{font-family:system-ui,sans-serif}
    ========================================================= */
 
 const KEY = 'essenszaehler_v1';
-const VERSION = '1.2';
+const VERSION = '1.5';
 
 // Nährwerte: Schlüssel, Name, Einheit
 const NUT = [['kcal','Kalorien','kcal'],['p','Eiweiß','g'],['c','Kohlenhydrate','g'],['f','Fett','g'],['fib','Ballaststoffe','g'],['sug','Zucker','g'],['salt','Salz','g']];
@@ -119,7 +120,7 @@ function defaults(){
   return {
     profile:{sex:'m',birth:'',height:'',weight:'',palIdx:2,pal:1.65,sport:false,deficit:500,
       goal:2000,calcWeight:null,calcDate:null,lastPrompt:null,
-      protPerKg:0.8,fatPct:30,fib:30,sug:50,salt:6,macroMode:'auto',protG:0,carbG:0,fatG:0},
+      protPerKg:0.8,fatPct:30,fib:30,sug:50,salt:6,macroMode:'auto',protG:0,carbG:0,fatG:0,targetW:0,targetDate:'',mode:'',setupDone:false},
     meals:['Frühstück','Mittagessen','Abendessen','Snacks'],
     diary:{}, foods:{}, recent:[], fav:[], recipes:[], shop:[],
     weights:{}, water:{}, waterGoal:2000,
@@ -133,6 +134,7 @@ try{
   D = Object.assign(defaults(), raw);
   D.profile = Object.assign(defaults().profile, raw.profile || {});
   D.fast = Object.assign(defaults().fast, raw.fast || {});
+  if(!D.profile.mode) D.profile.mode = D.profile.deficit>0 ? 'lose' : D.profile.deficit<0 ? 'gain' : 'keep';
 }catch(e){ D = defaults(); }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(D)); }catch(e){ toast('Speichern fehlgeschlagen: '+e.message); } }
 
@@ -224,6 +226,11 @@ function vDiary(){
   const pr = needPrompt();
   if(pr!=null && cur===today()){
     h += `<div class="card note"><b>Gewicht hat sich verändert</b><div style="margin-top:4px">Dein 7-Tage-Schnitt liegt bei <b>${fmtF(pr)} kg</b>. Dein Tagesziel wurde mit <b>${fmtF(D.profile.calcWeight)} kg</b> berechnet. Möchtest du den Bedarf neu berechnen?</div><div class="row gap"><button class="btn" onclick="promptYes()">Neu berechnen</button><button class="btn ghost" onclick="promptNo()">Nein, danke</button></div><div class="mut small" style="margin-top:6px">Es wird nichts automatisch geändert. Diese Frage kommt höchstens einmal pro Woche.</div></div>`;
+  }
+  if(!D.profile.setupDone && !D.profile.calcDate){
+    h += `<div class="card" style="border:1px solid var(--acc)"><b>Willkommen! Was ist dein Ziel?</b><div class="mut small" style="margin-top:4px">Danach rechnet die App deinen Tagesbedarf aus – mit komplettem Rechenweg.</div>
+      <div class="row gap"><button class="btn" style="flex:1" onclick="setMode('lose')">Abnehmen</button><button class="btn" style="flex:1" onclick="setMode('keep')">Halten</button><button class="btn" style="flex:1" onclick="setMode('gain')">Zunehmen</button></div>
+      <button class="btn ghost full" onclick="D.profile.setupDone=true;save();render()">Später</button></div>`;
   }
   if(cur===today() && D.weights[today()]==null){
     h += `<div class="card"><div class="row"><div style="flex:1"><b>⚖️ Heute schon gewogen?</b><div class="mut small">Tägliches Wiegen</div></div><input id="qw" class="inp w90" inputmode="decimal" placeholder="kg"><button class="btn" onclick="quickWeigh()">OK</button></div></div>`;
@@ -574,7 +581,9 @@ function vWeight(){
     <div class="stat"><div class="mut small">Letzter Wert</div><div class="v">${lw?fmtF(lw.kg)+' kg':'–'}</div><div class="mut small">${lw?dateDE(lw.k):''}</div></div>
     <div class="stat"><div class="mut small">7-Tage-Schnitt</div><div class="v">${a!=null?fmtF(a)+' kg':'–'}</div><div class="mut small">${a!=null?'':'ab 3 Werten in 7 Tagen'}</div></div>
     <div class="stat"><div class="mut small">Veränderung 30 Tage</div><div class="v">${ch30!=null?(ch30>0?'+':'')+fmtF(ch30)+' kg':'–'}</div></div>
-    <div class="stat"><div class="mut small">BMI</div><div class="v">${bmi?fmtF(bmi):'–'}</div><div class="mut small">${bmi?bmiCat(bmi):(hM?'':'Größe unter „Bedarf“ eintragen')}</div></div></div>`;
+    <div class="stat"><div class="mut small">BMI</div><div class="v">${bmi?fmtF(bmi):'–'}</div><div class="mut small">${bmi?bmiCat(bmi):(hM?'':'Größe unter „Bedarf“ eintragen')}</div></div>
+    ${D.profile.targetW?(()=>{ const tw = D.profile.targetW, cw = ref, rest = cw!=null ? cw - tw : null, start = D.profile.calcWeight || num(D.profile.weight); const pc = (rest!=null && start && start!==tw) ? Math.max(0,Math.min(100,(start-cw)/(start-tw)*100)) : null;
+      return `<div class="stat" style="grid-column:1/-1"><div class="row"><div style="flex:1"><div class="mut small">Zielgewicht</div><div class="v">${fmtF(tw)} kg</div></div><div style="text-align:right"><div class="mut small">${rest==null?'':Math.abs(rest)<0.1?'erreicht ✓':'noch'}</div><div class="v">${rest==null||Math.abs(rest)<0.1?'':fmtF(Math.abs(rest))+' kg'}</div></div></div>${pc!=null?bar(pc,100,'var(--acc)'):''}<div class="mut small" style="margin-top:4px">${D.profile.targetDate?'Wunschdatum: '+dateLong(D.profile.targetDate)+' · ':''}${pc!=null?fmt(pc)+' % geschafft':''}</div></div>`; })():''}</div>`;
   h += `<div class="card"><div class="row"><b style="flex:1">Verlauf</b>${[30,90,365].map(d=>`<button class="chip ${WR===d?'on':''}" onclick="WR=${d};render()">${d===365?'1 Jahr':d+' T'}</button>`).join('')}</div>${wChart(WR)}</div>`;
   h += `<div class="card"><b>Kalorien letzte 7 Tage</b>${kcalChart()}</div>`;
   const ks = Object.keys(D.weights).sort().reverse().slice(0,14);
@@ -587,13 +596,14 @@ function wChart(days){
   const end = today(), pts = [], av = [];
   for(let i=days-1;i>=0;i--){ const k = addDays(end,-i), x = days-1-i; if(D.weights[k]!=null) pts.push({x,y:D.weights[k]}); const a = avg7(k,2); if(a!=null) av.push({x,y:a}); }
   if(pts.length<2) return '<div class="mut" style="margin-top:10px">Mindestens 2 Einträge im Zeitraum nötig.</div>';
-  const ys = [...pts,...av].map(p=>p.y); let mn = Math.min(...ys), mx = Math.max(...ys); if(mx-mn<1){ mn -= .5; mx += .5; } const pd = (mx-mn)*.1; mn -= pd; mx += pd;
+  const tw = num(D.profile.targetW); const ys = [...pts,...av].map(p=>p.y); if(tw>0) ys.push(tw); let mn = Math.min(...ys), mx = Math.max(...ys); if(mx-mn<1){ mn -= .5; mx += .5; } const pd = (mx-mn)*.1; mn -= pd; mx += pd;
   const W = 340, H = 180, L = 36, B = 22, T = 10, R = 8, X = x => L+(W-L-R)*x/(days-1), Y = y => T+(H-T-B)*(1-(y-mn)/(mx-mn));
   let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="margin-top:10px">`;
   for(let i=0;i<=4;i++){ const v = mn+(mx-mn)*i/4, y = Y(v); s += `<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L-5}" y="${y+4}" text-anchor="end" fill="var(--mut)" font-size="10">${fmt(v,1)}</text>`; }
   s += `<text x="${L}" y="${H-5}" fill="var(--mut)" font-size="10">${dateDE(addDays(end,-(days-1)))}</text><text x="${W-R}" y="${H-5}" text-anchor="end" fill="var(--mut)" font-size="10">${dateDE(end)}</text>`;
   s += `<polyline fill="none" stroke="var(--mut)" stroke-width="1" stroke-dasharray="3 3" points="${pts.map(p=>X(p.x)+','+Y(p.y)).join(' ')}"/>`;
   s += pts.map(p=>`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${days>90?1.6:2.6}" fill="var(--acc2)"/>`).join('');
+  if(tw>0) s += `<line x1="${L}" x2="${W-R}" y1="${Y(tw)}" y2="${Y(tw)}" stroke="var(--warn)" stroke-dasharray="5 4"/><text x="${W-R}" y="${Y(tw)-4}" text-anchor="end" fill="var(--warn)" font-size="10">Ziel ${fmt(tw,1)}</text>`;
   if(av.length>1) s += `<polyline fill="none" stroke="var(--acc)" stroke-width="2.5" stroke-linejoin="round" points="${av.map(p=>X(p.x)+','+Y(p.y)).join(' ')}"/>`;
   s += '</svg>';
   return s + '<div class="mut small"><span style="color:var(--acc2)">●</span> Tageswert &nbsp; <span style="color:var(--acc)">━</span> 7-Tage-Schnitt</div>';
@@ -613,10 +623,17 @@ function kcalChart(){
 function vMore(){
   const p = D.profile, a7 = avg7(today()), g = goals();
   let h = `<div class="card"><b>Aktuelles Tagesziel</b><div class="big" style="margin-top:4px">${fmt(p.goal)} kcal</div>
-    <div class="mut small">${p.calcDate?'Berechnet am '+dateLong(p.calcDate)+' mit '+fmtF(p.calcWeight)+' kg':'Noch nicht berechnet – Standardwert'}</div>
+    <div class="mut small">Ziel: <b>${{lose:'Abnehmen',keep:'Gewicht halten',gain:'Zunehmen'}[p.mode]||'–'}</b></div><div class="mut small">${p.calcDate?'Berechnet am '+dateLong(p.calcDate)+' mit '+fmtF(p.calcWeight)+' kg':'Noch nicht berechnet – Standardwert'}</div>
     <div class="mut small" style="margin-top:6px">Das Ziel ändert sich nur, wenn du es hier übernimmst oder manuell setzt.</div></div>`;
 
+  const MODES = [['lose','Abnehmen'],['keep','Halten'],['gain','Zunehmen']];
+  const amt = Math.abs(num(p.deficit));
   h += `<div class="card" id="calccard"><b>Bedarf berechnen</b>
+    <label class="lbl">Was ist dein Ziel?</label>
+    <div class="seg">${MODES.map(([k,l])=>`<button class="${p.mode===k?'on':''}" onclick="setMode('${k}')">${l}</button>`).join('')}</div>
+    ${p.mode==='keep'?'':`<div class="row"><div style="flex:1"><label class="lbl">Zielgewicht (kg)</label><input class="inp" inputmode="decimal" placeholder="z. B. 85" value="${p.targetW?fmt(p.targetW,1):''}" oninput="D.profile.targetW=num(this.value);pchg()"></div>
+    <div style="flex:1"><label class="lbl">Bis wann? (optional)</label><input type="date" class="inp" min="${addDays(today(),1)}" value="${p.targetDate||''}" onchange="D.profile.targetDate=this.value;pchg()"></div></div>
+    <div class="mut small" style="margin-top:4px">Rechnung und Kalorienvorschlag zum Zielgewicht stehen weiter unten.</div>`}
     <div class="row"><div style="flex:1"><label class="lbl">Geschlecht</label><select class="inp" onchange="D.profile.sex=this.value;pchg()"><option value="m" ${p.sex==='m'?'selected':''}>Mann</option><option value="w" ${p.sex==='w'?'selected':''}>Frau</option></select></div>
     <div style="flex:1"><label class="lbl">Geburtsdatum</label><input type="date" class="inp" value="${p.birth}" onchange="D.profile.birth=this.value;pchg()"></div></div>
     <div class="row"><div style="flex:1"><label class="lbl">Größe (cm)</label><input class="inp" inputmode="decimal" value="${p.height?fmt(p.height,1):''}" oninput="D.profile.height=num(this.value);pchg()"></div>
@@ -626,10 +643,15 @@ function vMore(){
     ${PAL.map((x,i)=>`<label class="pal ${p.palIdx===i?'on':''}"><input type="radio" name="pal" ${p.palIdx===i?'checked':''} onchange="setPal(${i})"><b>${fmt(x.min,1)}–${fmt(x.max,1)}</b> · ${x.t}<div class="mut small" style="margin-left:24px">${x.b}</div></label>`).join('')}
     <label class="lbl">Genauer PAL-Wert (innerhalb der Spanne anpassbar)</label><input id="palv" class="inp" inputmode="decimal" value="${fmt(p.pal,2)}" oninput="D.profile.pal=num(this.value);pchg()">
     <label class="pal ${p.sport?'on':''}" style="margin-top:10px"><input type="checkbox" ${p.sport?'checked':''} onchange="D.profile.sport=this.checked;this.parentElement.classList.toggle('on',this.checked);pchg()">Sport 4–5× pro Woche je 30–60 Min. <b>(+0,3)</b></label>
-    <label class="lbl">Ziel</label><div class="chips">${[[0,'Halten'],[250,'−250'],[500,'−500'],[750,'−750']].map(([v,l])=>`<button class="defc chip ${num(p.deficit)===v?'on':''}" data-v="${v}" onclick="setDef(${v})">${l}</button>`).join('')}</div>
-    <label class="lbl">Kaloriendefizit pro Tag (kcal) – negativ = Überschuss</label><input id="defv" class="inp" inputmode="numeric" value="${fmt(p.deficit)}" oninput="D.profile.deficit=num(this.value);pchg()">
+    ${p.mode==='keep' ? `<div class="mut small" style="margin-top:12px">Ziel <b>Gewicht halten</b>: Tagesziel = Gesamtumsatz, kein Defizit.</div>` : `
+    <label class="lbl">${p.mode==='lose'?'Wie viel weniger pro Tag? (Defizit)':'Wie viel mehr pro Tag? (Überschuss)'}</label>
+    <div class="chips">${(p.mode==='lose'?[250,500,750]:[250,500]).map(v=>`<button class="defc chip ${amt===v?'on':''}" data-v="${v}" onclick="setDef(${v})">${p.mode==='lose'?'−':'+'}${v} kcal</button>`).join('')}</div>
+    <label class="lbl">${p.mode==='lose'?'Defizit':'Überschuss'} pro Tag (kcal), frei wählbar</label><input id="defv" class="inp" inputmode="numeric" value="${fmt(amt)}" oninput="setDefRaw(this.value)">`}
     <div class="calc" id="calcbox"></div>
     <button class="btn full" id="takebtn" onclick="takeGoal()">Als Tagesziel übernehmen</button></div>`;
+
+  h += `<div class="card" id="plancard"><b>Zielgewicht – Rechnung & Vorschlag</b>
+    <div class="calc" id="planbox"></div><div id="plansug"></div></div>`;
 
   h += `<div class="card"><b>Tagesziel manuell setzen</b><div class="row gap"><input id="mg" class="inp" style="flex:1" inputmode="numeric" placeholder="kcal" value="${fmt(p.goal)}"><button class="btn ghost" onclick="manualGoal()">Setzen</button></div></div>`;
 
@@ -680,28 +702,67 @@ Kohlenh.= (${fmt(g.kcal)} − ${fmt(g.p*4)} − ${fmt(g.f*9)}) ÷ 4 = ${fmt(g.c)
 function setMacroMode(m){ const p = D.profile, g = goals(); if(m==='manual' && !p.protG && !p.carbG && !p.fatG){ p.protG = g.auto.p; p.carbG = g.auto.c; p.fatG = g.auto.f; } p.macroMode = m; save(); render(); setTimeout(()=>$('#macrocard')?.scrollIntoView(),30); }
 function carbRest(){ const p = D.profile; p.carbG = Math.max(0, Math.round((p.goal - p.protG*4 - p.fatG*9)/4)); save(); render(); setTimeout(()=>$('#macrocard')?.scrollIntoView(),30); }
 function setPal(i){ const x = PAL[i]; D.profile.palIdx = i; D.profile.pal = Math.round((x.min+x.max)/2*100)/100; $('#palv').value = fmt(D.profile.pal,2); document.querySelectorAll('.pal input[type=radio]').forEach((r,j)=>r.parentElement.classList.toggle('on',j===i)); pchg(); }
-function setDef(v){ D.profile.deficit = v; $('#defv').value = fmt(v); document.querySelectorAll('.defc').forEach(c => c.classList.toggle('on', +c.dataset.v===v)); pchg(); }
+function sgn(){ const m = D.profile.mode; return m==='lose' ? 1 : m==='gain' ? -1 : 0; }
+function setDef(v){ D.profile.deficit = sgn()*Math.abs(v); const i = $('#defv'); if(i) i.value = fmt(Math.abs(v)); document.querySelectorAll('.defc').forEach(c => c.classList.toggle('on', +c.dataset.v===Math.abs(v))); pchg(); }
+function setDefRaw(val){ D.profile.deficit = sgn()*Math.abs(num(val)); document.querySelectorAll('.defc').forEach(c => c.classList.toggle('on', +c.dataset.v===Math.abs(num(val)))); pchg(); }
+function setMode(m){ const p = D.profile, a = Math.abs(num(p.deficit)); p.mode = m; p.setupDone = true; p.deficit = m==='keep' ? 0 : (m==='lose' ? 1 : -1) * (a || (m==='lose' ? 500 : 250)); save(); if(tab!=='more'){ go('more'); setTimeout(()=>$('#calccard')?.scrollIntoView({behavior:'smooth'}),50); } else render(); }
 function pchg(){ save(); updCalc(); }
 function updCalc(){
   const box = $('#calcbox'); if(!box) return; const c = calc(), p = D.profile;
+  updPlan(c);
   if(!c){ box.textContent = 'Bitte Geburtsdatum, Größe und Gewicht eintragen –\ndann erscheint hier der komplette Rechenweg.'; $('#takebtn').disabled = true; return; }
   $('#takebtn').disabled = false;
   const r = Math.round;
   let t = `Alter: ${c.a} Jahre (aus Geburtsdatum)\n\n`;
   t += `① Grundumsatz (Mifflin-St Jeor, ${p.sex==='m'?'Mann':'Frau'})\n`;
-  t += `   = 10 × Gewicht + 6,25 × Größe − 5 × Alter ${p.sex==='m'?'+ 5':'− 161'}\n`;
+  t += `   = 10 × Gewicht + 6,25 × Größe\n     − 5 × Alter ${p.sex==='m'?'+ 5':'− 161'}\n`;
   t += `   = 10 × ${fmt(c.w,1)} + 6,25 × ${fmt(c.h,1)} − 5 × ${c.a} ${p.sex==='m'?'+ 5':'− 161'}\n`;
   t += `   = ${fmt(10*c.w,1)} + ${fmt(6.25*c.h,2)} − ${fmt(5*c.a)} ${p.sex==='m'?'+ 5':'− 161'}\n`;
   t += `   = ${fmt(r(c.bmr))} kcal\n\n`;
   t += `② PAL-Wert\n   = ${fmt(c.palBase,2)}${p.sport?` + 0,3 (Sport) = ${fmt(c.pal,2)}`:''}\n\n`;
   t += `③ Gesamtumsatz = Grundumsatz × PAL\n   = ${fmt(r(c.bmr))} × ${fmt(c.pal,2)}\n   = ${fmt(r(c.tdee))} kcal\n\n`;
-  t += `④ Tagesziel = Gesamtumsatz − Defizit\n   = ${fmt(r(c.tdee))} − ${fmt(c.def)}\n   = ${fmt(r(c.goal))} kcal`;
-  if(c.def>0) t += `\n\n   Faustregel: ${fmt(c.def)} kcal/Tag ≈ ${fmt(c.def*7/7000,2)} kg/Woche\n   (Annahme ≈ 7.000 kcal pro kg Körperfett, grobe Schätzung)`;
+  if(p.mode==='keep') t += `④ Tagesziel (Halten)\n   = Gesamtumsatz\n   = ${fmt(r(c.goal))} kcal`;
+  else if(p.mode==='gain') t += `④ Tagesziel (Zunehmen)\n   = Gesamtumsatz + Überschuss\n   = ${fmt(r(c.tdee))} + ${fmt(-c.def)}\n   = ${fmt(r(c.goal))} kcal\n\n   ≈ ${fmt(-c.def*7/7000,2)} kg/Woche\n   (Faustregel 7.000 kcal/kg, grob)`;
+  else t += `④ Tagesziel (Abnehmen)\n   = Gesamtumsatz − Defizit\n   = ${fmt(r(c.tdee))} − ${fmt(c.def)}\n   = ${fmt(r(c.goal))} kcal`;
+  if(p.mode==='lose' && c.def>0) t += `\n\n   ≈ ${fmt(c.def*7/7000,2)} kg/Woche\n   (Faustregel 7.000 kcal/kg, grob)`;
   if(c.goal < c.bmr) t += `\n\n⚠ Das Ziel liegt unter deinem Grundumsatz.`;
   box.textContent = t;
 }
+function plan(c){
+  const p = D.profile, tw = num(p.targetW); if(!c || !(tw>0)) return null;
+  const diff = c.w - tw, kcal = Math.abs(diff)*7000, lose = diff>0;
+  const r = {tw, diff, kcal, lose};
+  if(p.targetDate){ const d = daysBetween(today(), p.targetDate); if(d>0){ r.days = d; r.needDef = (lose?1:-1)*kcal/d; r.sugGoal = c.tdee - r.needDef; r.rate = Math.abs(diff)/d*7; } }
+  if(lose && c.def>0 && D.profile.mode==='lose') r.eta = Math.ceil(kcal/c.def);
+  if(!lose && c.def<0 && D.profile.mode==='gain') r.eta = Math.ceil(kcal/(-c.def));
+  return r;
+}
+function updPlan(c){
+  const box = $('#planbox'), sug = $('#plansug'); if(!box) return; const p = D.profile, R = Math.round;
+  if(!c){ box.textContent = 'Erst oben Geburtsdatum, Größe und Gewicht eintragen.'; sug.innerHTML = ''; return; }
+  const P = plan(c);
+  if(!P){ box.textContent = 'Zielgewicht eintragen – dann rechnet die App\naus, wie lange es dauert bzw. welches\nTagesziel zu deinem Wunschdatum passt.'; sug.innerHTML = ''; return; }
+  if(Math.abs(P.diff) < 0.1 || p.mode==='keep'){
+    box.textContent = (Math.abs(P.diff) < 0.1 ? '✓ Du bist bei deinem Zielgewicht.\n' : `Ziel ist „Halten“ – das Zielgewicht ${fmt(P.tw,1)} kg\nwird dabei nicht angesteuert.\nFür ${P.lose?'Abnehmen':'Zunehmen'} oben das Ziel umstellen.\n`) + 'Zum Halten: Tagesziel = Gesamtumsatz\n= '+fmt(R(c.tdee))+' kcal';
+    sug.innerHTML = p.mode==='keep' ? '' : `<button class="btn full" onclick="D.profile.mode='keep';D.profile.deficit=0;takeGoal()">Auf Halten umstellen → ${fmt(R(c.tdee))} kcal</button>`; return; }
+  const clash = (P.lose && p.mode==='gain') || (!P.lose && p.mode==='lose');
+  const verb = P.lose ? 'abnehmen' : 'zunehmen';
+  let t = `⑤ Zielgewicht ${fmt(P.tw,1)} kg\n   ${verb}: ${P.lose?fmt(c.w,1)+' − '+fmt(P.tw,1):fmt(P.tw,1)+' − '+fmt(c.w,1)} = ${fmt(Math.abs(P.diff),1)} kg\n   Energie: ${fmt(Math.abs(P.diff),1)} kg × 7.000 kcal\n          ≈ ${fmt(R(P.kcal))} kcal`;
+  if(P.days){
+    t += `\n\n⑥ Bis ${dateLong(p.targetDate)} = ${P.days} Tage\n   ${P.lose?'Nötiges Defizit':'Nötiger Überschuss'} = ${fmt(R(P.kcal))} ÷ ${P.days}\n          = ${fmt(R(Math.abs(P.needDef)))} kcal/Tag\n   Vorschlag = ${fmt(R(c.tdee))} ${P.lose?'−':'+'} ${fmt(R(Math.abs(P.needDef)))}\n          = ${fmt(R(P.sugGoal))} kcal/Tag\n   Tempo ≈ ${fmt(P.rate,2)} kg/Woche`;
+    if(P.lose && P.sugGoal < c.bmr) t += `\n\n⚠ Der Vorschlag liegt unter deinem Grundumsatz\n  (${fmt(R(c.bmr))} kcal). Späteres Datum wählen?`;
+    if(P.rate > 1) t += `\n\n⚠ Mehr als 1 kg pro Woche ist sehr schnell.`;
+  }
+  if(P.eta){ t += `\n\n${P.days?'⑦':'⑥'} Mit deinem jetzigen ${P.lose?'Defizit':'Überschuss'} (${fmt(Math.abs(c.def))} kcal/Tag)\n   ${fmt(R(P.kcal))} ÷ ${fmt(Math.abs(c.def))} = ${P.eta} Tage\n   → Ziel ca. am ${dateLong(addDays(today(),P.eta))}`; }
+  else if(!P.days) t += `\n\n   Mit ${c.def===0?'Defizit 0':'deinem jetzigen Wert'} erreichst du das Ziel nicht –\n   ${P.lose?'Defizit':'Überschuss'} oben einstellen oder ein Datum wählen.`;
+  if(clash) t = `⚠ Dein Zielgewicht passt nicht zu „${p.mode==='lose'?'Abnehmen':'Zunehmen'}“:\n  ${fmt(P.tw,1)} kg liegt ${P.lose?'unter':'über'} deinem Gewicht (${fmt(c.w,1)} kg).\n  Mit „Vorschlag übernehmen“ wird das Ziel\n  auf „${P.lose?'Abnehmen':'Zunehmen'}“ umgestellt.\n\n` + t;
+  t += `\n\n(7.000 kcal pro kg = grobe Faustregel)`;
+  box.textContent = t;
+  sug.innerHTML = P.days ? `<button class="btn full" onclick="takePlan()">Vorschlag übernehmen → ${fmt(R(P.sugGoal))} kcal</button><div class="mut small" style="margin-top:6px">Setzt ${P.lose?'das Defizit':'den Überschuss'} oben auf ${fmt(R(Math.abs(P.needDef)))} kcal und übernimmt das Tagesziel. Nichts passiert automatisch.</div>` : '';
+}
+function takePlan(){ const c = calc(), P = plan(c); if(!P || !P.days) return; D.profile.deficit = Math.round(P.needDef); D.profile.mode = P.needDef>0 ? 'lose' : 'gain'; takeGoal(); }
 function takeGoal(){
-  const c = calc(); if(!c) return;
+  const c = calc(); if(!c) return; D.profile.setupDone = true;
   D.profile.goal = Math.round(c.goal); D.profile.calcWeight = c.w; D.profile.calcDate = today(); D.profile.lastPrompt = today();
   save(); render(); toast('Neues Tagesziel: '+fmt(D.profile.goal)+' kcal');
 }
